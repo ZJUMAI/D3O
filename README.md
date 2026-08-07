@@ -3,12 +3,6 @@
 This repository is the experimental code used for
 **D3O: Dynamic Distribution Distillation for Ordinal Regression**.
 
-The model, loss computation, EMA teacher, shallow-layer distillation, ConLE
-implementation, optimizer grouping, metrics, and Lightning training loop are
-retained from the original `OrdinalCLIP` experiment. Dataset switches and
-configuration files for MORPH II, Aesthetics, Historical Color Images,
-Diabetic Retinopathy, and Tongue datasets have been removed.
-
 
 ## Installation
 
