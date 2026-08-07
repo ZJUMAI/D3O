@@ -34,7 +34,7 @@ class RegCLIPSSR(nn.Module):
         text_encoder_name,
         image_encoder_name,
         prompt_learner_cfg,
-        d = 768, # 768, 1024, 4096
+        d=768,
         dino_model_name="facebook/dinov3-vitb16-pretrain-lvd1689m",
         clip_vision_model_name="openai/clip-vit-base-patch16",
         **kwargs,
@@ -59,7 +59,6 @@ class RegCLIPSSR(nn.Module):
         self.dino_encoder  = AutoModel.from_pretrained(pretrained_model_name, device_map="auto")
         self.image_encoder = CLIPVisionModel.from_pretrained(clip_vision_model_name)
 
-        # self.text_encoder = clip_model.text_model.encoder
         self.text_encoder = TextEncoder(clip_model)
         prompt_learner_cfg.update(dict(clip_model=clip_model))
         self.prompt_learner: PlainPromptLearner = PROMPT_LEARNERS.build(prompt_learner_cfg)
@@ -102,7 +101,6 @@ class RegCLIPSSR(nn.Module):
         )
         self.drop = nn.Dropout()
 
-        # self.log_vars = nn.Parameter(torch.zeros(self.num_ranks, self.d))
         self.cls_layer = nn.Linear(self.d, self.num_ranks)
         init.kaiming_uniform_(self.cls_layer.weight, nonlinearity='relu')
         init.zeros_(self.cls_layer.bias)
@@ -110,7 +108,7 @@ class RegCLIPSSR(nn.Module):
 
         # Shallow classifiers attached to intermediate layers.
         # Produce per-layer shallow logits for deep->shallow self-distillation.
-        self.layers = list(range(12))#[1, 6, -3, -2, -1]# list(range(12))
+        self.layers = list(range(12))
         self.shallow_logit_layers = self.layers[:-1] if len(self.layers) > 1 else list(self.layers)
         self.shallow_classifiers = nn.ModuleList([nn.Linear(self.d, self.num_ranks) for _ in self.shallow_logit_layers])
         for m in self.shallow_classifiers:
@@ -119,8 +117,6 @@ class RegCLIPSSR(nn.Module):
         self.regressor = SSRModule()
 
         self.fuse = LLNLayerScale(num_layers=len(self.layers), dim=self.d)
-
-        # self.cbn_matrix = nn.Parameter(torch.randn(self.num_concepts, self.num_ranks))
 
         # Shallow-to-deep feature correction (for deep-to-shallow distillation pipeline).
         # Use early-layer CLS features to generate a residual that corrects deep features,
@@ -131,7 +127,6 @@ class RegCLIPSSR(nn.Module):
         self.shallow_gate = nn.Parameter(torch.tensor(0.0))
 
         if pretrained_model_name == "facebook/dinov3-vit7b16-pretrain-lvd1689m":
-            # self.apply_lora_to_image_encoder()
             self.apply_frozen_image_encoder()
 
         # EMA衰减率
@@ -159,67 +154,26 @@ class RegCLIPSSR(nn.Module):
 
         return pooled_output
 
-    # def encode_text(self):
-    #     sentence_embeds = self.prompt_learner() # [num_class, 77, 512]
-    #     psudo_sentence_tokens = self.psudo_sentence_tokens # [num_class, 77]
-    #     # print("sentence_embeds:", sentence_embeds.shape)
-    #     # print("psudo_sentence_tokens:", psudo_sentence_tokens)
-    #     # text_features = self.text_encoder(sentence_embeds, psudo_sentence_tokens)
-    #     x = sentence_embeds.type(self.dtype) + self.positional_embedding.type(self.dtype)
-    #     x = x.permute(1, 0, 2)  # NLD -> LND
-    #     x = self.transformer(x)
-    #     x = x.permute(1, 0, 2)  # LND -> NLD
-    #     x = self.ln_final(x).type(self.dtype) # [5, 77, 512]
-    #     x = x[torch.arange(x.shape[0]), psudo_sentence_tokens.argmax(dim=-1)] @ self.text_projection
-
-    #     return x
-#
     def forward(self, images, mode='student'):
         # NOTE: `mode` is kept for backward compatibility; EMA teacher is managed by Runner.
 
-        # inputs = self.processor(images=images, return_tensors="pt")
-        # image_features = self.image_encoder(images)[:, 0, :]
-        # image_features = self.image_encoder(pixel_values=images).last_hidden_state[:,5:,:]
-        # dino_features = self.dino_encoder(pixel_values=images).pooler_output
-
-        # image_features = self.image_encoder(**images).pooler_output
         output = self.image_encoder(pixel_values=images, return_dict=True, output_hidden_states=True)
-        # image_features = output.pooler_output
 
         hs = output.hidden_states # (b, 13, 197, d)  前12层是transformer的输出，最后一层是post_layernorm的输出(pooler_output是对[CLS] token做了线性变换和tanh激活)
 
         # Multi-level CLS features (B, L, D) used by runner-side distillation.
         layer_cls = torch.stack([hs[i][:, 0, :] for i in self.layers], dim=1)
-        # shallow_hs = torch.stack(hs[:6], dim=1)  # (batch, 6, seq_len, hidden_dim)
-        # shallow_hs = shallow_hs[:, :, 0, :].mean(dim=1)    # # 前六层cls token取平均
-        # image_features = shallow_hs + image_features # (b, 2d)
-        # image_features = self.down_adapter(image_features) # (b, d)
-        # image_features = hs[-1][:,0,:] #+ dino_features # + image_features   # (b, d)
-        # patch_features = hs[-1][:,1:,:]
-
-        # layer = self.layers
-        # hs_list = []
-        # for i in layer:
-        #     y = self.image_adapter(hs[i][:,0,:])
-        #     y_ratio = 1.0
-        #     hs_list.append(y_ratio * y + (1 - y_ratio) * hs[i][:,0,:])
 
         sentence_embeds = self.prompt_learner() # [num_class, 77, 512]
         psudo_sentence_tokens = self.psudo_sentence_tokens # [num_class, 77]
         text_features = self.text_encoder(sentence_embeds, psudo_sentence_tokens)
         text_features = self.align_adapter(text_features)
-        # sys.exit()
-        # hs = F.normalize(hs, dim=-1)
         patch_features = hs[-1][:,1:,:] # (B, N, D)
-        # text_features = F.normalize(text_features, dim=-1)
 
         # Deep feature (default last layer CLS).
         deep_feat = hs[-1][:, 0, :]
 
-        # Shallow feature: mean CLS of the first half of `self.layers`.
-        # split = max(1, len(self.layers) // 2)
-        # shallow_idx = self.layers[:split]
-        # shallow_feat = torch.stack([hs[i][:, 0, :] for i in shallow_idx], dim=1).mean(dim=1)
+        # Shallow feature: mean CLS over intermediate layers.
         shallow_feat = torch.stack([hs[i][:, 0, :] for i in self.shallow_logit_layers], dim=1).mean(dim=1)
         # Multi-depth shallow logits from intermediate layers (trainable shallow classifiers).
         shallow_logits_multi = None
@@ -228,7 +182,6 @@ class RegCLIPSSR(nn.Module):
             shallow_logits_multi = torch.stack(
                 [clf(feat) for clf, feat in zip(self.shallow_classifiers, shallow_feats_multi)], dim=1
             )
-            # shallow_feat = shallow_feats_multi.mean(dim=1)
         except Exception:
             shallow_logits_multi = None
 
@@ -243,7 +196,6 @@ class RegCLIPSSR(nn.Module):
         image_features = image_features / image_features.norm(dim=-1, keepdim=True)
         text_features = text_features / text_features.norm(dim=-1, keepdim=True)
         logits_cos = logit_scale * image_features @ text_features.t()
-        # logits_lin = self.cls_layer(image_features)
 
         image_features, text_features = self.project(image_features, text_features)
         # Also expose shallow/deep logits for optional distillation losses.、
@@ -255,28 +207,9 @@ class RegCLIPSSR(nn.Module):
         attn_text = attn_weights @ text_features
         attn_fused = torch.cat([image_features, attn_text], dim=-1)
         enhance_logits = self.recover(attn_fused)
-        # enhance_logits = image_features @ text_features.t()
 
-        # shallow_logits = logit_scale * (shallow_feat / shallow_feat.norm(dim=-1, keepdim=True)) @ text_features.t()
         shallow_logits = shallow_logits_multi.mean(dim=1)
-        # logits = image_features @ text_features.t()
-
-        # logits = self.topk_max_pooling(logits, 64)
-        # logits = logits.mean(dim=1)
-
-        # mat = F.softmax(self.cbn_matrix, dim=-1)  # (num_concept, num_ranks)
-        # cbn = image_features @ concept_text_features.t()  # (B, num_concept)
-        # logits_base = (cbn @ mat)  # (B, num_ranks)
-
-        # logits_base = self.cls_layer(image_features)
-        # text_features = torch.zeros_like(image_features).cuda()
-
-        # logits = logits.mean(dim=1)
-        # text_features = 0
-
-        # regress_age = self.regressor(logits_base)
         regress_age = 0
-        # print(regress_age.shape)
 
         aux = {
             "layer_cls": layer_cls,

@@ -6,12 +6,6 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 
-import math
-from functools import reduce
-from operator import mul
-from torch.nn import Dropout
-from torch.nn.modules.utils import _pair
-
 class Bottleneck(nn.Module):
     expansion = 4
 
@@ -225,44 +219,21 @@ class VisionTransformer(nn.Module):
         self.ln_post = LayerNorm(width)
         self.proj = nn.Parameter(scale * torch.randn(width, output_dim))
 
-        # VPT  random init
-        # val = math.sqrt(6. / float(3 * reduce(mul, _pair(patch_size), 1) + width))  # noqa
-        # self.prompt_embeddings = nn.Parameter(torch.zeros(1, 1, width))
-        # nn.init.uniform_(self.prompt_embeddings.data, -val, val)
-        # self.prompt_proj = nn.Linear(width, width)
-        # nn.init.kaiming_normal_(self.prompt_proj.weight, a=0, mode='fan_out')
-        # self.prompt_dropout = Dropout(0.1)
-
     def forward(self, x: torch.Tensor):
-        # print(x.shape)  # [32, 3, 224, 224]
         x = self.conv1(x)  # shape = [*, width, grid, grid]
         x = x.reshape(x.shape[0], x.shape[1], -1)  # shape = [*, width, grid ** 2]
         x = x.permute(0, 2, 1)  # shape = [*, grid ** 2, width]
-        # print(x.shape)  # [32, 196, 768]
         x = torch.cat([self.class_embedding.to(x.dtype) + torch.zeros(x.shape[0], 1, x.shape[-1], dtype=x.dtype, device=x.device), x], dim=1)  # shape = [*, grid ** 2 + 1, width]
-        # print(x.shape) # [32, 197, 768]
         x = x + self.positional_embedding.to(x.dtype)
-
-        # prompt = self.prompt_dropout(self.prompt_proj(self.prompt_embeddings).expand(x.shape[0], -1, -1))
-        # x = torch.cat((x[:, :1, :], prompt, x[:, 1:, :]), dim=1)
-        # print(x.shape)
 
         x = self.ln_pre(x) # [32, 197, 768]
 
         x = x.permute(1, 0, 2)  # NLD -> LND
         x = self.transformer(x)
-        # print(x.shape) # [197, 32, 768]
         x = x.permute(1, 0, 2)  # LND -> NLD
-        # print(x.shape) # [32, 197, 768]
-        # x = self.ln_post(x[:, 0, :])   # 只返回 cls token
         x = self.ln_post(x)              # 返回 cls token + 全部 patch tokens
-        # print(x.shape) # [32, 768]
         if self.proj is not None:
             x = x @ self.proj
-
-        # print("---------")
-        # print("vit shape", x.shape) # [32, 512]
-        # print("---------")
 
         return x
 
@@ -460,5 +431,4 @@ def build_model(state_dict: dict):
 
     convert_weights(model)
     model.load_state_dict(state_dict, strict=False)
-    # print("vision_patch_size", vision_patch_size)
     return model.eval()

@@ -52,9 +52,7 @@ class Runner(pl.LightningModule):
         self.module = MODELS.build(model_cfg)
         # Configurable label smoothing for CE loss
         self.ce_loss_func = nn.CrossEntropyLoss()
-        # self.ce_loss_func = nn.CrossEntropyLoss(label_smoothing=0.1)
         self.kl_loss_func = nn.KLDivLoss(reduction="sum")
-        # self.reg_loss_func = nn.L1Loss()
         self.reg_loss_func = nn.MSELoss()
 
         # Merge user-provided weights with defaults so newly introduced keys
@@ -85,11 +83,9 @@ class Runner(pl.LightningModule):
         self.conle_tau = float(conle_tau)
         self.conle_threshold = float(conle_threshold)
         self.num_ranks = self.module.num_ranks
-        # self.num_ranks = 5
         self.num_class = self.num_ranks
         self.register_buffer("rank_output_value_array", torch.arange(0, self.num_ranks).float(), persistent=False)
         self.output_dir = Path(output_dir)
-        # self._custom_logger = get_logger(__name__)
         self._custom_logger = logger
 
 
@@ -261,13 +257,11 @@ class Runner(pl.LightningModule):
             return None
 
         t = teacher_aux.get("enhance_logits", None)
-        # t = teacher_aux.get("deep_logits", None)
         if t is None or not torch.is_tensor(t):
             return None
 
         # Prefer multi-depth shallow logits (B, K, C).
         s_multi = student_aux.get("shallow_logits_multi", None)
-        # if torch.is_tensor(s_multi) and s_multi.ndim == 3:
         k = int(s_multi.shape[1])
         if k <= 0:
             return None
@@ -275,14 +269,7 @@ class Runner(pl.LightningModule):
         for i in range(k):
             losses.append(self.compute_kd_loss(s_multi[:, i, :], t.detach()))
 
-        # print('shallow cls layer')
         return torch.stack(losses).mean()
-
-        # Fallback to single shallow logits.
-        # s = student_aux.get("shallow_logits", None)
-        # if s is None or not torch.is_tensor(s):
-        #     return None
-        # return self.compute_kd_loss(s, t.detach())
 
     def compute_shallow_ce_loss(self, student_aux, y):
         """Supervise per-layer shallow logits with the original CE loss.
@@ -331,7 +318,7 @@ class Runner(pl.LightningModule):
 
         C = torch.exp(sim_xy / tau)
         # Match the TF code: exp((cos(x,x) - I)/tau). Diagonal becomes exp(0)=1.
-        CX = torch.exp((sim_xx - torch.eye(B, device=x.device, dtype=sim_xx.dtype)) / tau) #
+        CX = torch.exp((sim_xx - torch.eye(B, device=x.device, dtype=sim_xx.dtype)) / tau)
 
         numer = torch.diag(C)
         denom = CX.sum(dim=1) + C.sum(dim=1) - numer
@@ -371,13 +358,6 @@ class Runner(pl.LightningModule):
         D = F.softmax(logits_for_D, dim=-1)
         L = F.one_hot(y_idx, num_classes=Cn).to(dtype=D.dtype)
 
-        # dis = torch.sum((L - D) ** 2)
-        # dis = self.ce_loss_func(D, y_idx)
-
-        # max_neg = torch.max(D * (1 - L), dim=1).values
-        # min_pos = torch.min(D * L + (1 - L), dim=1).values
-        # thr = torch.mean(torch.clamp(max_neg - min_pos + self.conle_threshold, min=0.0))
-
         B, C = D.shape
         idx = torch.arange(B, device=D.device)
         pos = D[idx, y_idx]  # [B]
@@ -392,7 +372,7 @@ class Runner(pl.LightningModule):
         loss_mat = dist * margin_term * (1 - L)
         thr = loss_mat.sum(dim=1).mean()
 
-        total = con + self.conle_beta * thr #+ self.conle_alpha * dis
+        total = con + self.conle_beta * thr
         return {
             "conle_con_loss": con,
             "conle_thr_loss": thr,
@@ -491,8 +471,6 @@ class Runner(pl.LightningModule):
 
     def on_save_checkpoint(self, checkpoint):
         checkpoint["extra_value"] = getattr(self, "extra_value", None)
-        # print("extra_value added to checkpoint")
-
     def _split_batch(self, batch):
         x, y = batch
         return x, y, None
@@ -639,26 +617,7 @@ class Runner(pl.LightningModule):
         else:
             outputs = res
 
-        # # Make sure val_* metrics exist for ModelCheckpoint monitor keys.
-        # self.logging(outputs, "val", on_step=True, on_epoch=True)
-
-        # # step级展示：当前batch单峰率(均值)
-        # if isinstance(outputs, dict) and ("unimodal_ratio_metric" in outputs):
-        #     self.log(
-        #         "val_unimodal_ratio_metric",
-        #         outputs["unimodal_ratio_metric"].float().mean(),
-        #         on_step=True,
-        #         on_epoch=False,
-        #         prog_bar=True,
-        #         logger=True,
-        #     )
-
         return outputs
-
-    # def test_step(self, batch, batch_idx):
-    #     outputs = self.run_step(batch, batch_idx, "test")
-
-    #     return outputs
 
     def test_step(self, batch, batch_idx):
         x, y = batch
@@ -712,31 +671,6 @@ class Runner(pl.LightningModule):
 
     def test_epoch_end(self, outputs) -> None:
         self.eval_epoch_end(outputs, "test")
-
-    def on_train_epoch_start(self) -> None:
-        opts = self.optimizers()
-
-        def _summarize_optimizer(opt):
-            param_group_lrs = {}
-            for i, pg in enumerate(getattr(opt, "param_groups", [])):
-                name = pg.get("name", f"group_{i}")
-                params = pg.get("params", [])
-                try:
-                    n_params = len(params)
-                except TypeError:
-                    n_params = len(list(params))
-                param_group_lrs[name] = (pg.get("lr", None), n_params)
-            return param_group_lrs
-
-        if isinstance(opts, (list, tuple)):
-            for i, opt in enumerate(opts):
-                summary = _summarize_optimizer(opt)
-                # logger.info(
-                #     f"check optimizer[{i}] `param_groups` lr @ epoch {self.current_epoch}: {summary}"
-                # )
-        else:
-            summary = _summarize_optimizer(opts)
-            # logger.info(f"check optimizer `param_groups` lr @ epoch {self.current_epoch}: {summary}")
 
     def on_fit_start(self) -> None:
         pl.seed_everything(self.seed, workers=True)
@@ -1053,11 +987,6 @@ class Runner(pl.LightningModule):
                 names = [name_by_id.get(id(p), f"<unnamed:{id(p)}>" ) for p in ps]
                 if len(names) <= max_names_to_print:
                     self._custom_logger.info(f"[build_param_dict] group={gname} params={names}")
-                else:
-                    head = names[:max_names_to_print]
-                    # self._custom_logger.info(
-                    #     f"[build_param_dict] group={gname} params(head {max_names_to_print}/{len(names)})={head}"
-                    # )
 
             # Also print unassigned-but-trainable (should be empty unless base_lr==0)
             remaining_trainable = [

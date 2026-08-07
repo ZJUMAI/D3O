@@ -41,7 +41,6 @@ class PlainPromptLearner(nn.Module):
         context_embeds, _num_context_tokens = self.create_context_embeds(
             clip_model, num_ranks, num_context_tokens, init_context, rank_specific_context, logger, dtype
         )
-        # print(rank_specific_context, context_embeds.shape)
         num_context_tokens = _num_context_tokens
         self.context_embeds = nn.Parameter(
             context_embeds
@@ -54,7 +53,6 @@ class PlainPromptLearner(nn.Module):
         )
         num_tokens_per_rank = _num_tokens_per_rank
         self.rank_embeds = nn.Parameter(rank_embeds)
-        # self.rank_embeds = nn.Parameter(rank_embeds).detach().cuda()  # (num_ranks, max_num_tokens_per_rank, embeddings_dim)
         assert len(rank_embeds) == num_ranks, f"len(rank_embeds) {len(rank_embeds)} == num_ranks {num_ranks}"
 
         # psudo sentence tokens

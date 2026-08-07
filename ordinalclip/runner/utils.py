@@ -90,8 +90,6 @@ def save_checkpoint(
             with open(checkpoint_file + ".tmp", "w") as f:
                 for i in range(len(lines) - topk, len(lines)):
                     f.write(lines[i])
-            # from IPython.core.debugger import set_trace
-            # set_trace()
 
             for file_path in lines[: len(lines) - topk]:
                 file_path = osp.join(save_dir, file_path.strip("\n"))
@@ -103,7 +101,6 @@ def save_checkpoint(
 
     if is_best:
         best_fpath = osp.join(osp.dirname(fpath), "model-best.pth.tar")
-        # shutil.copy(fpath, best_fpath)
         best_state = OrderedDict()
         if filter_prefix:
             for k, v in state["state_dict"].items():
