@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.cache/
+.pytest_cache/
+.DS_Store
+
+data/adience/
+outputs/
+results/
+checkpoints/
+*.ckpt
+*.pth
+*.pt

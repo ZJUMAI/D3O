@@ -1,0 +1,15 @@
+torch>=2.0
+torchvision>=0.15
+pytorch-lightning==1.8.6
+torchmetrics>=1.0
+omegaconf>=2.2
+modelscope>=1.20
+transformers>=4.37
+numpy>=1.23
+pandas>=1.5
+matplotlib>=3.5
+Pillow>=9.0
+PyYAML>=6.0
+ftfy>=6.1
+regex
+tqdm
