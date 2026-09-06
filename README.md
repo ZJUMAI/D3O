@@ -13,9 +13,6 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
-The original experiment instantiated both DINOv3 and CLIP vision encoders. DINOv3
-is retained for compatibility with the original checkpoints, although the
-released forward pass uses the CLIP hidden states.
 
 ## Train
 
